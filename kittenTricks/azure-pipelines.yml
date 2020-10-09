@@ -1,0 +1,70 @@
+# Node.js with React
+# Build a Node.js project that uses React.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+trigger:
+- master
+
+pool:
+  vmImage: 'macOS 10.14'
+variables:
+  - name: configuration
+    value: 'Release'
+  - name: sdk
+    value: 'iphoneos'
+steps:
+- task: NodeTool@0
+  inputs:
+    versionSpec: '10.x'
+  displayName: 'Install Node.js'
+- script: |
+    yarn install
+  displayName: 'yarn install'
+# - task: InstallAppleCertificate@2
+#   inputs:
+#    certSecureFile: '$(p12FileName)'
+#    certPwd: '$(p12Password)'
+#    keychain: 'temp'
+#    deleteCert: true
+# - task: InstallAppleProvisioningProfile@1
+#   condition: eq(variables['Build.SourceBranchName'], 'staging')
+#   inputs:
+#    provisioningProfileLocation: 'secureFiles'
+#    provProfileSecureFile: '$(provisioningProfileiPadStaging)'
+#    removeProfile: true 
+#    provProfileSourceRepository:
+# - task: InstallAppleProvisioningProfile@1
+#   condition: eq(variables['Build.SourceBranchName'], 'prod')
+#   inputs:
+#    provisioningProfileLocation: 'secureFiles'
+#    provProfileSecureFile: '$(provisioningProfileiPadProd)'
+#    removeProfile: true 
+#    provProfileSourceRepository: 
+- task: CocoaPods@0
+  inputs:
+    workingDirectory: 'ios'
+    forceRepoUpdate: false
+- task: CmdLine@2
+  inputs:
+    script: 'yarn run build'
+  displayName: 'Create iOS Bundle'
+- task: Xcode@5
+  inputs:
+    actions: 'build'
+    sdk: '$(sdk)'
+    configuration: '$(configuration)'
+    xcWorkspacePath: '$(Build.SourcesDirectory)/packages/app/ios/kittenTricks.xcworkspace'
+    xcodeVersion: 'default'
+    packageApp: true
+    signingOption: 'auto'
+- task: CopyFiles@2
+  inputs:
+    contents: '**/*.ipa'
+    targetFolder: '$(build.artifactStagingDirectory)'
+    overWrite: true
+- task: PublishBuildArtifacts@1
+  inputs:
+    pathtoPublish: '$(build.artifactStagingDirectory)/output/$(sdk)/$(configuration)' 
+    artifactName: 'Mobile_$(Build.BuildNumber)_$(Build.SourceBranchName)'
+    publishLocation: 'Container'

@@ -1,0 +1,170 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'macOS 10.14'
+variables:
+  - group: RN-pipeline
+  - name: configuration
+    value: 'Release'
+  - name: sdk
+    value: 'iphoneos'
+stages:
+  - stage: iOS
+    jobs:
+    - job: Build_iOS
+      displayName: "Build iOS"
+      steps:
+      - task: NodeTool@0
+        inputs:
+          versionSpec: '10.x'
+        displayName: 'Install Node.js'
+      - script: |
+          yarn install
+        displayName: 'yarn rebuild'
+      - script: |
+          cd eva && yarn install
+        displayName: 'eva install'
+      - script: |
+          cd react-native-ui-kitten && yarn install
+        displayName: 'ui-kitten install'           
+      - task: InstallAppleCertificate@2
+        inputs:
+         certSecureFile: '$(p12FileName)'
+         certPwd: '$(p12Password)'
+         keychain: 'temp'
+         deleteCert: true
+      - task: InstallAppleProvisioningProfile@1
+        inputs:
+         provisioningProfileLocation: 'secureFiles'
+         provProfileSecureFile: '$(provisioningProfile)'
+         removeProfile: true 
+      - task: CocoaPods@0
+        inputs:
+          workingDirectory: '$(Build.SourcesDirectory)/kittenTricks/ios'
+          forceRepoUpdate: false
+#For this next step to work, Azure Devops extension 'Mobile App Tasks for iOS and Android' must be installed
+      - task: ios-bundle-version@1
+        displayName: bump iOS version
+        inputs:
+          sourcePath: '$(Build.SourcesDirectory)/kittenTricks/ios/kittenTricks/info.plist'
+          versionCodeOption: 'buildid'
+          versionCode: '2'
+          versionName: '2.4.3$(Build.BuildId)'
+          printFile: true
+      - task: CmdLine@2
+        inputs:
+          script: 'npx react-native bundle --entry-file=''index.js'' --bundle-output=''./ios/main.jsbundle'' --dev=false --platform=ios'
+          workingDirectory: '$(Build.SourcesDirectory)/kittenTricks/'
+        displayName: 'Create iOS Bundle'
+      - task: Xcode@5
+        inputs:
+          actions: 'build'
+          scheme: 'kittenTricks'
+          sdk: '$(sdk)'
+          configuration: '$(configuration)'
+          xcWorkspacePath: '$(Build.SourcesDirectory)/kittenTricks/kittenTricks.xcworkspace'
+          xcodeVersion: 'default'
+          packageApp: true
+          signingOption: 'manual'
+          signingIdentity: '$(APPLE_CERTIFICATE_SIGNING_IDENTITY)'
+          provisioningProfileUuid: '$(APPLE_PROV_PROFILE_UUID)'
+      - task: CopyFiles@2
+        inputs:
+          contents: '**/*.ipa'
+          targetFolder: '$(build.artifactStagingDirectory)'
+          overWrite: true
+      - task: PublishBuildArtifacts@1
+        inputs:
+          pathtoPublish: '$(build.artifactStagingDirectory)/output/$(sdk)/$(configuration)'
+          artifactName: 'Mobile_$(Build.SourceBranchName)'
+          publishLocation: 'Container'
+      - task: AppCenterDistribute@3
+        inputs:
+          serverEndpoint: '{ServiceConnectionName}'
+          appSlug: '{AppcenterUsername/AppName}'
+          appFile: '$(build.artifactStagingDirectory)/output/$(sdk)/$(configuration)'
+          symbolsIncludeParentDirectory: true
+          releaseNotesOption: 'input'
+          releaseNotesInput: |
+            Commit ID: $(Build.SourceVersion)
+            $(Build.SourceVersionMessage)
+            Pipeline: $(Build.BuildUri)'
+            latest source: '$(Build.SourceVersion)'
+          destinationType: 'groups'
+  - stage: Android
+    condition: succeededOrFailed()
+    jobs:
+    - job: Build_Android
+      displayName: "Build Android"
+      steps:
+      - task: NodeTool@0
+        inputs:
+          versionSpec: '10.x'
+        displayName: 'Install Node.js'
+      - script: |
+          yarn rebuild
+        displayName: 'yarn rebuild'
+#For this next step to work, Azure Devops extension 'Mobile App Tasks for iOS and Android' must be installed
+      - task: android-manifest-version@1
+        inputs:
+          sourcePath: '$(Build.SourcesDirectory)/packages/app/android/app/src/main/AndroidManifest.xml'
+          versionCodeOption: 'buildid'
+          versionCode: '2'
+          versionName: '2.3.$(Build.BuildId)'
+          printFile: true
+      - task: CmdLine@2
+        inputs:
+          script: 'npx react-native bundle --platform=android --dev=false --entry-file=index.js --bundle-output=android/app/src/main/assets/index.android.bundle --assets-dest=android/app/src/main/res'
+          workingDirectory: '$(Build.SourcesDirectory)/packages/app'
+        displayName: 'Create Android Bundle'
+      - task: Gradle@2
+        displayName: 'gradlew assemble$(Build.SourceBranchName)Debug'
+        inputs:
+          gradleWrapperFile: '$(Build.SourcesDirectory)/packages/app/android/gradlew'
+          workingDirectory: '$(Build.SourcesDirectory)/packages/app/android'
+          tasks: 'assemble$(Build.SourceBranchName)Debug'
+          gradleOptions: '-Xmx3072m'
+          publishJUnitResults: false
+          javaHomeOption: 'JDKVersion'
+          jdkVersionOption: '1.8'
+          jdkArchitectureOption: 'x64'
+      - task: AndroidSigning@3
+        inputs:
+          apkFiles: '**/*.apk' 
+          apksign: true
+          apksignerKeystoreFile: '{InsertKeystoreSecureFileName}'
+          apksignerKeyPassword: '$(keystorePassword)'
+          apksignerKeystorePassword: '$(keystorePassword)'
+          keystoreAlias: 'key0'
+      - task: AndroidSigning@3
+        inputs:
+          apkFiles: '**/*.apk' 
+          apksign: true
+          apksignerKeystoreFile: '{InsertKeystoreSecureFileName}'
+          apksignerKeyPassword: '$(keystorePassword)'
+          apksignerKeystorePassword: '$(keystorePassword)'
+          keystoreAlias: 'key0'
+      - task: CopyFiles@2
+        inputs:
+          contents: '**/*.apk'
+          targetFolder: '$(build.artifactStagingDirectory)'
+          overWrite: true
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: '$(build.artifactStagingDirectory)/packages/app/android/app/build/outputs/apk/$(Build.SourceBranchName)/debug/{AppName}-debug.apk'
+          artifactName: 'Mobile_$(Build.BuildNumber)_$(Build.SourceBranchName)'
+          publishLocation: 'container'
+      - task: AppCenterDistribute@3
+        inputs:
+          serverEndpoint: '{ServiceConnectionName}'
+          appSlug: '{AppcenterUsername/AppName}'
+          appFile: '$(build.artifactStagingDirectory)/packages/app/android/app/build/outputs/apk/$(Build.SourceBranchName)/debug/{AppName}-debug.apk'
+          symbolsIncludeParentDirectory: true
+          releaseNotesOption: 'input'
+          releaseNotesInput: |
+            Commit ID: $(Build.SourceVersion)
+            $(Build.SourceVersionMessage)
+            Pipeline: $(Build.BuildUri)'
+            latest source: '$(Build.SourceVersion)'
+          destinationType: 'groups'
