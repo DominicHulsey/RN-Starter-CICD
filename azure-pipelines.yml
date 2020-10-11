@@ -1,14 +1,19 @@
 trigger:
-- main
+- master
 
 pool:
   vmImage: 'macOS 10.14'
 variables:
-  - group: RN-pipeline
   - name: configuration
     value: 'Release'
   - name: sdk
     value: 'iphoneos'
+  - name: 'p12FileName'
+    value: 'Certificates.p12'
+  - name: 'p12Password'
+    value: '{insert password}'
+  - name: 'provisioningProfile'
+    value: '{insert provisioning profile secure file name}'
 stages:
   - stage: iOS
     jobs:
@@ -21,23 +26,30 @@ stages:
         displayName: 'Install Node.js'
       - script: |
           yarn install
-        displayName: 'yarn rebuild'
+        workingDirectory: 'kittenTricks'
+        displayName: 'yarn install'
       - script: |
-          cd eva && yarn install
+          yarn install
+        workingDirectory: 'eva'
         displayName: 'eva install'
       - script: |
-          cd react-native-ui-kitten && yarn install
-        displayName: 'ui-kitten install'           
+          yarn install
+        workingDirectory: 'react-native-ui-kitten'
+        displayName: 'react-native-ui-kitten install'
+      - script: |
+          yarn env prod
+        workingDirectory: 'kittenTricks'
+        displayName: 'Set env prod'
       - task: InstallAppleCertificate@2
         inputs:
-         certSecureFile: '$(p12FileName)'
-         certPwd: '$(p12Password)'
+         certSecureFile: 'Certificates.p12'
+         certPwd: '{Insert Password Here}'
          keychain: 'temp'
          deleteCert: true
       - task: InstallAppleProvisioningProfile@1
         inputs:
          provisioningProfileLocation: 'secureFiles'
-         provProfileSecureFile: '$(provisioningProfile)'
+         provProfileSecureFile: '{insert provisioning profile secure file name}'
          removeProfile: true 
       - task: CocoaPods@0
         inputs:
@@ -60,10 +72,10 @@ stages:
       - task: Xcode@5
         inputs:
           actions: 'build'
-          scheme: 'kittenTricks'
+          scheme: 'KittenTricks'
           sdk: '$(sdk)'
           configuration: '$(configuration)'
-          xcWorkspacePath: '$(Build.SourcesDirectory)/kittenTricks/kittenTricks.xcworkspace'
+          xcWorkspacePath: '$(Build.SourcesDirectory)/kittenTricks/ios/kittenTricks.xcworkspace'
           xcodeVersion: 'default'
           packageApp: true
           signingOption: 'manual'
@@ -79,11 +91,19 @@ stages:
           pathtoPublish: '$(build.artifactStagingDirectory)/output/$(sdk)/$(configuration)'
           artifactName: 'Mobile_$(Build.SourceBranchName)'
           publishLocation: 'Container'
+      - script: |
+          npm install -g increase-memory-limit
+        workingDirectory: 'kittenTricks'
+        displayName: 'Install Node memory tool'
+      - script: |
+          increase-memory-limit
+        workingDirectory: 'kittenTricks'
+        displayName: 'Increase default Node memory'
       - task: AppCenterDistribute@3
         inputs:
-          serverEndpoint: '{ServiceConnectionName}'
-          appSlug: '{AppcenterUsername/AppName}'
-          appFile: '$(build.artifactStagingDirectory)/output/$(sdk)/$(configuration)'
+          serverEndpoint: 'Nexus'
+#           appSlug: '{Insert Appcenter app name in this format: 'username/app'
+          appFile: '$(build.artifactStagingDirectory)/output/$(sdk)/$(configuration)/*.ipa'
           symbolsIncludeParentDirectory: true
           releaseNotesOption: 'input'
           releaseNotesInput: |
@@ -105,7 +125,7 @@ stages:
       - script: |
           yarn rebuild
         displayName: 'yarn rebuild'
-#For this next step to work, Azure Devops extension 'Mobile App Tasks for iOS and Android' must be installed
+# For this next step to work, Azure Devops extension 'Mobile App Tasks for iOS and Android' must be installed
       - task: android-manifest-version@1
         inputs:
           sourcePath: '$(Build.SourcesDirectory)/packages/app/android/app/src/main/AndroidManifest.xml'
